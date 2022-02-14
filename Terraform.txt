@@ -1,0 +1,482 @@
+# Configure the AWS Provider
+provider "aws" {
+  region     = "us-east-2"
+  access_key = "AKIA5M2AVX2BBEEGHO5N"
+  secret_key = "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"
+}
+
+#create VPC
+resource "aws_vpc" "VPC" {
+  cidr_block = "10.0.0.0/16"
+  tags = {
+    Name = "chatapp_VPC_TF"
+  }
+}
+
+#create Internet gateway
+resource "aws_internet_gateway" "IGW" {
+  vpc_id = aws_vpc.VPC.id
+
+  tags = {
+    Name = "chatapp_IGW_TF"
+  }
+}
+
+#create public subnet 1
+resource "aws_subnet" "PUB_subnet_1" {
+  vpc_id     = aws_vpc.VPC.id
+  cidr_block = "10.0.1.0/24"
+  availability_zone = "us-east-2a"
+  map_public_ip_on_launch = "true"
+
+  tags = {
+    Name = "chatapp_PUB1_TF"
+  }
+}
+
+#create public subnet 2
+resource "aws_subnet" "PUB_subnet_2" {
+  vpc_id     = aws_vpc.VPC.id
+  cidr_block = "10.0.2.0/24"
+  availability_zone = "us-east-2b"
+  map_public_ip_on_launch = "true"
+
+  tags = {
+    Name = "chatapp_PUB2_TF"
+  }
+}
+
+#create private subnet 1
+resource "aws_subnet" "PRIVT_subnet_1" {
+  vpc_id     = aws_vpc.VPC.id
+  cidr_block = "10.0.3.0/24"
+  availability_zone = "us-east-2a"
+
+  tags = {
+    Name = "chatapp_PRIVT1_TF"
+  }
+}
+
+#create private subnet 2
+resource "aws_subnet" "PRIVT_subnet_2" {
+  vpc_id     = aws_vpc.VPC.id
+  cidr_block = "10.0.4.0/24"
+  availability_zone = "us-east-2b"
+
+  tags = {
+    Name = "chatapp_PRIVT2_TF"
+  }
+}
+
+#create route_table
+resource "aws_route_table" "PUB_RT" {
+  vpc_id = aws_vpc.VPC.id
+}
+
+#adding route to Public route table
+resource "aws_route" "public_internet_gateway" {
+  route_table_id         = aws_route_table.PUB_RT.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.IGW.id
+}
+
+#Association of public subnet 1 with public route table
+resource "aws_route_table_association" "PUB_ASS1" {
+  subnet_id = aws_subnet.PUB_subnet_1.id
+  route_table_id = aws_route_table.PUB_RT.id
+}
+
+#Association of public subnet 2 with public route table
+resource "aws_route_table_association" "PUB_ASS2" {
+  subnet_id = aws_subnet.PUB_subnet_2.id
+  route_table_id = aws_route_table.PUB_RT.id
+}
+
+#Assigning Elastic IP for providing static IP
+resource "aws_eip" "EIP" {
+vpc      = true
+}
+
+#Create NAT gateway
+resource "aws_nat_gateway" "TF_Ngw" {
+  allocation_id = "${aws_eip.EIP.id}"
+  subnet_id     = aws_subnet.PUB_subnet_1.id
+  tags = {
+    Name = "NAT_GW"
+  }
+}
+
+#Creating Private Route Table
+resource "aws_route_table" "PIRVT_RT" {
+  vpc_id = aws_vpc.VPC.id
+  
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_nat_gateway.TF_Ngw.id
+  }
+  tags = {
+    Name = "PRIVT_RT"
+  }
+}
+
+#Association of Private Subnet 1 with private route table
+resource "aws_route_table_association" "private-asso1" {
+  subnet_id      = aws_subnet.PRIVT_subnet_1.id
+  route_table_id = aws_route_table.PIRVT_RT.id
+}
+
+#Association of Private Subnet 2 with private route table
+resource "aws_route_table_association" "private-asso2" {
+  subnet_id      = aws_subnet.PRIVT_subnet_2.id
+  route_table_id = aws_route_table.PIRVT_RT.id
+  } 
+
+  #Security Group for Ansible-Server
+resource "aws_security_group" "AnsibleserverSG" {
+  name        = "allow_http_ansible"
+  description = "Allow http inbound traffic"
+  vpc_id      = aws_vpc.VPC.id
+  
+  ingress {
+    description = "ssh"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "HTTP from VPC"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+ingress {
+    description = "tcp"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "Https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "MySql"
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+
+  tags = {
+    Name = "AnsibleserverSG"
+  }
+}
+
+
+#Security Group for Web-Server
+resource "aws_security_group" "WebserverSG" {
+  name        = "allow_http_front"
+  description = "Allow http inbound traffic"
+  vpc_id      = aws_vpc.VPC.id
+  
+  ingress {
+    description = "ssh"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "HTTP from VPC"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+ingress {
+    description = "tcp"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "Https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "MySql"
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+
+  tags = {
+    Name = "WebserverSG"
+  }
+}
+
+#Security Group for ApplicationServer
+resource "aws_security_group" "ApplicationSG" {
+  name        = "allow_http"
+  description = "Allow http inbound traffic"
+  vpc_id      = aws_vpc.VPC.id
+  
+  ingress {
+    description = "ssh"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "HTTP from VPC"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+ingress {
+    description = "tcp"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "Https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "MySql"
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+
+  tags = {
+    Name = "ApplicationSG"
+  }
+}
+
+#launch Ansible Server
+resource "aws_instance" "Ansible-Server" {
+  ami = "ami-0fb653ca2d3203ac1"
+  instance_type = "t2.micro"
+  subnet_id = aws_subnet.PUB_subnet_1.id
+  key_name = "CFP_AWS"
+ security_groups = ["${aws_security_group.AnsibleserverSG.id}"]
+ associate_public_ip_address = true
+tags = {
+    Name = "Ansible-Server"
+  }
+}
+
+
+#launch Web Server
+resource "aws_instance" "Web-Server" {
+  ami = "ami-0fb653ca2d3203ac1"
+  instance_type = "t2.micro"
+  subnet_id = aws_subnet.PUB_subnet_1.id
+  key_name = "CFP_AWS"
+ security_groups = ["${aws_security_group.WebserverSG.id}"]
+ associate_public_ip_address = true
+tags = {
+    Name = "Web-Server"
+  }
+}
+
+#launch Application Server
+resource "aws_instance" "Application-Server" {
+  ami = "ami-0fb653ca2d3203ac1"
+  instance_type = "t2.micro"
+  subnet_id = aws_subnet.PRIVT_subnet_1.id
+  key_name = "CFP_AWS"
+ security_groups = ["${aws_security_group.ApplicationSG.id}"]
+ associate_public_ip_address = false
+
+tags = {
+    Name = "Application-Server"
+  }
+}
+
+#creat DB subnet group
+resource "aws_db_subnet_group" "db_subnet" {
+  name       = "db_subnet"
+  subnet_ids = [aws_subnet.PRIVT_subnet_1.id, aws_subnet.PRIVT_subnet_2.id]
+  
+  tags = {
+    Name = "db_subnet_tf"
+  }
+}
+
+#creating database 
+resource "aws_db_instance" "Database_TF" {
+  allocated_storage    = 10
+  engine               = "mysql"
+  instance_class       = "db.t2.micro"
+  name                 = "ChatappTF"
+  username             = "admin"
+  password             = "admin123"
+  db_subnet_group_name = aws_db_subnet_group.db_subnet.id
+  skip_final_snapshot  = true
+}
+
+
+
+
+#backend launchconfig
+resource "aws_launch_configuration" "BackendLConfig" {
+  name          = "Backend-LaunchConfiguration"
+  image_id      = "ami-0fb653ca2d3203ac1"
+  instance_type = "t2.micro"
+  security_groups = [aws_security_group.ApplicationSG.id]
+}
+
+#Create a Backend Load Balancer
+resource "aws_lb" "BackendLB" {
+  name               = "Backend-LB"
+  internal           =  true
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.ApplicationSG.id]
+  subnets            = [aws_subnet.PRIVT_subnet_1.id, aws_subnet.PRIVT_subnet_2.id]
+  tags = {
+       Name = "Backend-LB"
+  }
+}
+
+#Create a Backend Target Group
+resource "aws_lb_target_group" "BackendTG" {
+  name     = "Backend-TargetGroup"
+  port     = 8000
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.VPC.id
+}
+
+#Create a Listner for Backend Load balancer
+resource "aws_lb_listener" "Backend-Listner" {
+  load_balancer_arn = aws_lb.BackendLB.arn
+  port              = "8000"
+  protocol          = "HTTP"
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.BackendTG.arn
+  }
+}
+
+
+#Backend Auto Scaling Group
+resource "aws_autoscaling_group" "Backend-ASG" {
+  name                      = "Backend-ASG"
+  max_size                  = 3
+  min_size                  = 1
+  health_check_grace_period = 300
+  health_check_type         = "ELB"
+  desired_capacity          = 1
+  launch_configuration      = aws_launch_configuration.BackendLConfig.id
+  vpc_zone_identifier       = [aws_subnet.PRIVT_subnet_1.id, aws_subnet.PRIVT_subnet_2.id]
+  target_group_arns         = [aws_lb_target_group.BackendTG.arn]
+  tag {
+    key                 = "Name"
+    value               = "ASG-Backend"
+    propagate_at_launch = true
+  }
+}
+
+#Frontend launchconfig
+resource "aws_launch_configuration" "FrontendLConfig" {
+  name          = "Frontend-LaunchConfiguration"
+  image_id      = "ami-0fb653ca2d3203ac1"
+  instance_type = "t2.micro"
+  security_groups = [aws_security_group.WebserverSG.id]
+}
+
+#Create a Frontend Load Balancer
+resource "aws_lb" "FrontendLB" {
+  name               = "Frontend-LB"
+  internal           =  false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.WebserverSG.id]
+  subnets            = [aws_subnet.PUB_subnet_1.id, aws_subnet.PUB_subnet_2.id]
+  tags = {
+       Name = "Frontend-LB"
+  }
+}
+
+#Create a Frontend Target Group
+resource "aws_lb_target_group" "FrontendTG" {
+  name     = "Frontend-TargetGroup"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.VPC.id
+}
+
+#Create a Listner for Frontend Load balancer
+resource "aws_lb_listener" "Frontend-Listner" {
+  load_balancer_arn = aws_lb.FrontendLB.arn
+  port              = "80"
+  protocol          = "HTTP"
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.FrontendTG.arn
+  }
+}
+
+
+#Frontend Auto Scaling Group
+resource "aws_autoscaling_group" "Frontend-ASG" {
+  name                      = "Frontend-ASG"
+  max_size                  = 3
+  min_size                  = 1
+  health_check_grace_period = 300
+  health_check_type         = "ELB"
+  desired_capacity          = 1
+  launch_configuration      = aws_launch_configuration.FrontendLConfig.id
+  vpc_zone_identifier       = [aws_subnet.PUB_subnet_1.id, aws_subnet.PUB_subnet_2.id]
+  target_group_arns         = [aws_lb_target_group.FrontendTG.arn]
+  tag {
+    key                 = "Name"
+    value               = "ASG-Frontend"
+    propagate_at_launch = true
+  }
+}
+
+
